@@ -520,8 +520,538 @@ delete()메서드는 delete()메서드로 전달 받은 엔티티가 영속성 �
 
 그렇게 매핑된 영속 객체를 대상으로 삭제 요청을 수행하는 메서드를 실행해 작업을 마치고 커밋(commit) 단계에서 삭제를 진행하게 된다.
 
-## DAO 연동을 위한 컨트롤러와 서비스
+# DAO 연동을 위한 컨트롤러와 서비스
 
 앞에서 설계한 구성 요소들을 클라이언트의 요청과 연결하려면 컨트롤러와 서비스를 생성해야 한다.
 
 이를 위해 **먼저 (1) DAO의 메서드를 호출**하고  그 외 **(2)비즈니스 로직을 수행하는 서비스 레이어를 생성**한 후 **(3)컨트롤러**를 생성해야한다.
+
+### 서비스 클래스 만들기
+
+서비스 레이어에서는 도메인 모델을 활용해 애플리케이션에서 제공하는 핵심 기능을 제공한다.
+여기서 말하는 핵심 기능을 구현하려면 세부 기능을 정의해야 한다.
+세부 기능이 모여 핵심 기능을 구현하기 때문이다.
+이러한 모든 로직을 서비스 레이어에서 포함하기란 쉽지 않은 일이다.
+
+이 같은 아키텍처의 한계를 극복하기 위해 아키텍처를 서비스 로직과 비즈니스 로직으로 분리하기도 한다.
+도메인을 활용한 세부 기능들을 비즈니스 레이어의 로직에서 구현하고, 서비스 레이어에서는 기능들을 종합해서 핵심 기능을 전달하도록 구성하는 경우가 대표적이다.
+
+다만 이 책의 목적은 과도한 기능 구현보다는 어떻게 프로젝트를 구성하고 스프링 부트의 기능을 온전히 사용할 수 있는지를 고민하는 것이므로 서비스 레이어에서 비즈니스 로직을 처리하는 아키텍처로 진행합니다.
+
+서비스 객체는 DAO와 마찬가지로 추상화해서 구성합니다.
+
+(service패키지와 클래스 인터페이스를 구성함. → ProductService와 ProductServiceImpl)
+
+서비스 인터페이스를 작성하기 전에 필요한 DTO 클래스를 생성해야 합니다.
+
+ProductDto 와 ProductResponseDto 클래스를 생성해주면 됩니다.
+
+```java
+// 예제 6.18
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@ToString
+@Builder
+public class ProductDto {
+
+    private String name;
+
+    private int price;
+
+    private int stock;
+
+}
+```
+
+```java
+// 예제 6.19
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@ToString
+public class ProductResponseDto {
+
+    private Long number;
+
+    private String name;
+
+    private int price;
+
+    private int stock;
+
+}
+```
+
+필요에 따라 빌더 메서드와 hashCode/equals 메서드도 추가할 수 있습니다.
+
+<aside>
+👉 **빌더 메서드**
+빌더 메서드는 빌더 패턴을 따르는 메서드
+데이터 클래스를 사용할 때 생성자로 초기화할 경우 모든 필드에 값을 넣거나 null을 명시적으로 사용해야 한다.
+이러한 단점을 보완하기 위해 나온 패턴이 빌더 패턴이며, 이 패턴을 이용하면 필요한 데이터만 설정할 수 있어 유연성을 확보할 수 있다.
+
+**왜 생성자 초기화 시 모든 필드에 값을 넣거나 null을 명시적으로 사용해야 하는가?**
+자바 또는 스프링 부트와 같은 객체지향 프로그래밍에서 객체를 생성할 때 생성자를 사용하면, 객체의 필드에 초기값을 설정해야 합니다. 
+생성자를 통해 객체를 초기화할 때 모든 필드 값을 전달하지 않으면 컴파일 에러가 발생하거나 객체의 일부 필드가 기본값(null 또는 기본 자료형의 초기값)으로 설정됩니다. 
+이는 두 가지 문제를 야기할 수 있습니다.
+
+1. **명시성 부족**
+모든 필드를 생성자를 통해 초기화할 때, 필드의 순서나 목적이 명확하지 않을 수 있습니다. 많은 매개변수를 받는 생성자는 사용 시 어떤 값이 어떤 필드에 해당하는지 혼동을 일으킬 수 있습니다.
+2. **유연성 부족**
+객체의 일부 필드만 초기화하고 싶을 때, 나머지 필드는 null로 설정하거나 기본값을 명시해야 하는데, 이는 코드의 유지 관리성과 안전성을 떨어뜨릴 수 있습니다.
+</aside>
+
+### **빌더 패턴**
+
+빌더 패턴은 이러한 문제를 해결하기 위해 등장했습니다. 
+빌더 패턴을 사용하면 객체의 생성 과정을 단계적으로 진행할 수 있으며, 필요한 필드만 설정하여 객체를 생성할 수 있습니다. 
+이는 코드의 가독성과 유지 보수성을 크게 향상시킵니다.
+
+### **스프링 부트에서의 빌더 패턴 예제**
+
+다음은 **`User`** 클래스에 대해 생성자 방식과 빌더 패턴을 사용하는 방식의 차이를 보여주는 코드 예제입니다.
+
+```java
+public class User {
+    private String name;
+    private String email;
+    private int age;
+
+    // 일반 생성자
+    public User(String name, String email, int age) {
+        this.name = name;
+        this.email = email;
+        this.age = age;
+    }
+
+    // 빌더 클래스
+    public static class Builder {
+        private String name;
+        private String email;
+        private int age;
+
+        public Builder name(String name) {
+            this.name = name;
+            return this;
+        }
+
+        public Builder email(String email) {
+            this.email = email;
+            return this;
+        }
+
+        public Builder age(int age) {
+            this.age = age;
+            return this;
+        }
+
+        public User build() {
+            return new User(name, email, age);
+        }
+    }
+}
+```
+
+### **사용 예시**
+
+```java
+public class Main {
+    public static void main(String[] args) {
+        // 생성자를 사용하는 경우
+        User user1 = new User("John Doe", "johndoe@example.com", 30);
+
+        // 빌더 패턴을 사용하는 경우
+        User user2 = new User.Builder()
+            .name("John Doe")
+            .email("johndoe@example.com")
+            .age(30)
+            .build();
+    }
+}
+```
+
+빌더 패턴을 사용하는 경우, **`Builder`** 내부 클래스를 통해 각 필드를 명확하게 설정할 수 있으며, 설정하지 않은 필드는 그대로 둘 수 있어 생성자를 사용할 때보다 훨씬 유연하고 안전한 코드를 작성할 수 있습니다. 또한, 필드의 순서를 고려할 필요 없이 메서드 체이닝을 통해 객체를 생성할 수 있어 코드의 가독성이 향상됩니다.
+
+그리고 서비스 인터페이스를 작성합니다.
+기본적인 CRUD의 기능을 호출하기 위해 간단하게 메서드를 정의하면 좋다.
+아래와 같이 코드를 작성할 수 있다.
+
+```java
+public interface ProductService{
+	ProductResponseDto getProduct(Long number);
+	ProductResponseDto saveProduct(ProductDto productDto);
+	ProductResponseDto changeProductName(Long number, String name) throws Exception;
+	
+	void deleteProduct(Long number) throws Exception;
+	}
+```
+
+위 인터페이스는 DAO에서 구현한 기능을 서비스 인터페이스에서 호출해 결괏값을 가져오는 작업을 수행하도록 설계했습니다.
+**서비스에서는 클라이언트가 요청한 데이터를 적절하게 가공해서 컨트롤러에게 넘기는 역할을 합니다.**
+이 과정에서 여러 메서드를 사용하는데, 지금은 간단하게 CRUD만 구현했습니다.
+
+위 예제를 보면 리턴 타입이 DTO 객체인 것을 볼 수 있습니다.
+DAO 객체에서 엔티티 타입을 사용하는 것을 고려하면 서비스 레이어에서 DTO 객체와 엔티티 객체를 각 레이어에 변환해서 전달하는 역할도 수행한다고 볼 수 있습니다.
+다만 이 부분은 실무 환경에서 내부적으로 어떻게 정의하느냐에 따라 달라질 수 있습니다.
+
+정리하면, db와 밀접한 관련이 있는 db 액세스 레이어까지는 엔티티 객체를 사용하고,
+클라이언트와 가까워지는 다른 레이어에서는 데이터를 교환하는 데 DTO 객체를 사용하는 것이 일반적이라는 것입니다.
+이 책에서 구현하는 스프링 부트 애플리케이션의 구조입니다.
+
+IMG
+
+서비스와 DAO의 사이에서 엔티티로 데이터를 전달하는 것으로 표현했지만 회사나 개발 그룹 내 규정에 따라 DTO를 사용하기도 합니다.
+위 구조는 각 레이어 사이의 큰 데이터의 전달을 표현한 것이고, 단일 데이터나 소량의 데이터를 전달하는 경우 DTO나 엔티티를 사용하지 않기도 합니다.
+
+지금까지 서비스 인터페이스를 생성했습니다.
+
+이제 구현체 클래스를 작성해 보자.
+
+```java
+// 예제 6.22
+@Service
+public class ProductServiceImpl implements ProductService {
+
+    private final ProductDAO productDAO;
+
+		/**
+		DTO 객체를 생성하고 값을 넣어 초기화하는 작업을 수행
+		*/
+    @Autowired
+    public ProductServiceImpl(ProductDAO productDAO) {
+        this.productDAO = productDAO;
+    }
+
+    // 예제 6.23
+    @Override
+    public ProductResponseDto getProduct(Long number) {
+        Product product = productDAO.selectProduct(number);
+
+        ProductResponseDto productResponseDto = new ProductResponseDto();
+        productResponseDto.setNumber(product.getNumber());
+        productResponseDto.setName(product.getName());
+        productResponseDto.setPrice(product.getPrice());
+        productResponseDto.setStock(product.getStock());
+
+        return productResponseDto;
+    }
+```
+
+현재 서비스 레이어에는 DTO 객체와 엔티티 객체가 공존하도록 설계돼 있어 변환 작업이 필요하다.
+DTO 객체를 생성하고 값을 넣어 초기화하는 작업을 수행하는 부분을 빌더(Builder) 패턴을 활용하거나 엔티티 객체나 DTO 객체 내부에 변환하는 메서드를 추가해서 간단하게 전환할 수 있습니다.
+
+**저장 메서드는 로직이 간단합니다.**
+
+```java
+@Service
+public class ProductServiceImpl implements ProductService {
+
+    private final ProductDAO productDAO;
+
+    @Autowired
+    public ProductServiceImpl(ProductDAO productDAO) {
+        this.productDAO = productDAO;
+    }
+	  	
+		@Override
+    public ProductResponseDto saveProduct(ProductDto productDto) {
+        Product product = new Product();
+        product.setName(productDto.getName());
+        product.setPrice(productDto.getPrice());
+        product.setStock(productDto.getStock());
+        product.setCreatedAt(LocalDateTime.now());
+        product.setUpdatedAt(LocalDateTime.now());
+
+        Product savedProduct = productDAO.insertProduct(product);
+				
+				// (22~26줄).
+        ProductResponseDto productResponseDto = new ProductResponseDto();
+        productResponseDto.setNumber(savedProduct.getNumber());
+        productResponseDto.setName(savedProduct.getName());
+        productResponseDto.setPrice(savedProduct.getPrice());
+        productResponseDto.setStock(savedProduct.getStock());
+
+        return productResponseDto;
+    }
+```
+
+전달받은 DTO 객체를 통해 엔티티 객체를 생성해서 초기화한 후 DAO 객체로 전달하면 되기 때문입니다. 다만 저장 메서드의 리턴 타입을 어떻게 지정할지는 고민해야 합니다.
+일반적으로 저장 메서드는 void 타입으로 작성하거나 작업의 성공 여부를 나타내는 boolean 타입으로 지정하는 경우가 많습니다.
+리턴 타입은 해당 비즈니스 로직이 어떤 성격을 띠느냐에 따라 결정하는 것이 바람직합니다.
+
+saveProduct() 메서드는 상품 정보를 전달하고 애플리케이션을 거쳐 db에 저장하는 역할을 수행합니다. 현재 데이터를 조회하는 메서드는 db에서 인덱스를 통해 값을 찾아야 하는데, void로 저장 메서드를 구현할 경우에는 클라이언트가 저장한 데이터의 인덱스 값을 알 방법이 없습니다.
+그렇기 떄문에 데이터를 저장하면서 가져온 인덱스를 DTO에 담아 결괏값으로 클라이언트에 전달하는 코드를 작성했습니다(22~26줄).
+만약 이 같은 방식이 아니라 void 형식으로 메서드를 작성한다면 조회 메서드를 추가로 구현하고 클라이언트에서 한 번 더 요청해야 합니다.
+
+업데이트 메서드 구현 
+
+```java
+@Service
+public class ProductServiceImpl implements ProductService {
+
+    private final ProductDAO productDAO;
+
+    @Autowired
+    public ProductServiceImpl(ProductDAO productDAO) {
+        this.productDAO = productDAO;
+    }
+	  	
+		@Override
+    public ProductResponseDto changeProductName(Long number, String name) throws Exception {
+        Product changedProduct = productDAO.updateProductName(number, name);
+
+        ProductResponseDto productResponseDto = new ProductResponseDto();
+        productResponseDto.setNumber(changedProduct.getNumber());
+        productResponseDto.setName(changedProduct.getName());
+        productResponseDto.setPrice(changedProduct.getPrice());
+        productResponseDto.setStock(changedProduct.getStock());
+
+        return productResponseDto;
+    }
+```
+
+changeProductName() 메서드는 상품정보 중 이름을 변경하는 작업을 수행합니다.
+이름을 변경하기 위해 먼저 클라이언트로부터 대상을 식별할 수 있는 인덱스 값과 변경하려는 이름을 받아옵니다.
+좀 더 견고하게 코드를 작성하기 위해서는 기존 이름도 받아와 식별자로 가져온 상품정보와 일치하는지 검증하는 단계를 추가하기도 합니다.
+
+이 기능의 핵심이 되는 비즈니스 로직은 레코드의 이름 칼럼을 변경하는 것입니다.
+
+실제 레코드 값을 변경하는 작업은 예제 6.14와 같이 DAO에서 진행하기 때문에 서비스 레이어에서는 해당 메서드를 호출해서 결괏값만 받아옵니다.
+
+# 컨트롤러
+
+서비스 객체의 설계를 마친 후에는 비즈니스 로직과 클라이언트의 요청을 연결하는 컨트롤러를 생성해야 한다.
+
+컨트롤러는 챕터 5장에 생성하는 방법에 대해 자세히 다뤗다.
+
+컨트롤러는 클라이언트로부터 요청을 받고 해당 요청에 대해 서비스 레이어에 구현된 적절한 메서드를 호출해서 결괏값을 받습니다.
+이처럼 컨트롤러는 request와 response을 전달하는 역할만 맡는 것이 가장 좋습니다.
+
+```java
+// 예제 6.26
+@RestController
+@RequestMapping("/product")
+public class ProductController {
+
+    private final ProductService productService;
+
+    @Autowired
+    public ProductController(ProductService productService) {
+        this.productService = productService;
+    }
+
+    @GetMapping()
+    public ResponseEntity<ProductResponseDto> getProduct(Long number) {
+        ProductResponseDto productResponseDto = productService.getProduct(number);
+
+        return ResponseEntity.status(HttpStatus.OK).body(productResponseDto);
+    }
+
+    @PostMapping()
+    public ResponseEntity<ProductResponseDto> createProduct(@RequestBody ProductDto productDto) {
+        ProductResponseDto productResponseDto = productService.saveProduct(productDto);
+
+        return ResponseEntity.status(HttpStatus.OK).body(productResponseDto);
+    }
+
+    @PutMapping()
+    public ResponseEntity<ProductResponseDto> changeProductName(
+            @RequestBody ChangeProductNameDto changeProductNameDto) throws Exception {
+        ProductResponseDto productResponseDto = productService.changeProductName(
+                changeProductNameDto.getNumber(), 
+                changeProductNameDto.getName()); //
+
+        return ResponseEntity.status(HttpStatus.OK).body(productResponseDto);
+
+    }
+
+    @DeleteMapping()
+    public ResponseEntity<String> deleteProduct(Long number) throws Exception {
+        productService.deleteProduct(number);
+
+        return ResponseEntity.status(HttpStatus.OK).body("정상적으로 삭제되었습니다.");
+    }
+}
+```
+
+changeProductNameDto는 아래 예제와 같이 구현합니다.
+
+```java
+// 예제 6.27
+public class ChangeProductNameDto {
+
+    private Long number;
+
+    private String name;
+
+    public ChangeProductNameDto(Long number, String name) {
+        this.number = number;
+        this.name = name;
+    }
+
+    public ChangeProductNameDto() {
+    }
+
+    public Long getNumber() {
+        return this.number;
+    }
+
+    public String getName() {
+        return this.name;
+    }
+
+    public void setNumber(Long number) {
+        this.number = number;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+}
+```
+
+각 기능에 대한 요청은 ‘**컨트롤러 -서비스 - DAO - 리포지토리**’의 계층을 따라 이동하고, 그것의 역순으로 응답을 전달하는 구조입니다.
+
+(스웨거를 통한 확인 : 139page~ 145page)
+
+## 롬복 - 반복되는 코드의 작성을 생략하는 방법
+
+롬복은 데이터(모델) 클래슬르 생성할 때 반복적으로 사용하는 getter/setter 같은 메서드를 어노테이션으로 대체하는 기능을 제공하는 라이브러리입니다.
+
+자바에서 데이터 클래스를 작성하면 대게 많은 변수를 선언하고, 각 멤버 변수별로 getter/setter 메서드를 만들어 코드가 길어지고 가독성이 떨어졌었습니다.
+
+### 롬복의 장점
+
+- 어노테이션 기반으로 코드를 자동 생성하므로 생산성이 높아진다.
+- 반복되는 코드를 생략할 수 있어 가독성이 좋아진다.
+- 롬복을 안다면 간단하게 코드를 유추할 수 있어 유지보수에 용이합니다.
+
+몇 가지 이유로 롬복을 사용하는 것을 선호하지 않는 개발자도 있습니다.
+롬복을 선호하지 않는 가장 큰 이유는 코드를 어노테이션이 자동 생성하기 때문에 메서드를 개발자의 의도대로 정확하게 구현하지 못하는 경우가 발생한다는 것입니다.
+
+### 롬복 적용
+
+진화하는 코드를 확인해보자. (149page~)
+
+롬복의 어노테이션이 어떤 메서드를 생성하는지는 인텔리제이에서 확인할 수 있습니다.
+
+![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/075997f4-35b2-4955-b621-060d6a108880/3a0ead17-ed94-4de4-a827-43b78cc39765/Untitled.png)
+
+Delombok을 하지 않고 생성된 메서드가 어떤 종류가 있는지 확인하려면 어노테이션을 작성하고 인텔리제이 좌측에 있는 Structure를 클릭하면 해당 클래스에 정의된 메서드 목록을 볼 수 있습니다.
+
+## 롬복의 주요 어노테이션
+
+### `@Getter, @Setter`
+
+클래스에 선언돼 있는 필드에 대한 getter/setter 메서드를 생성한다.
+
+해당 어노테이션을 통해 Product 클래스가 가지고 있는 필드에 대해 각각 getter/setter 메서드가 생성되는 것을 볼 수 있습니다.
+
+인텔리제이 등의 ide가 제공하는 자동 생성 메서드와 기능 차이는 없지만 코드의 라인 수를 줄이는 데는 효과적입니다.
+
+### 생성자 자동 생성 어노테이션
+
+데이터 클래스의 초기화를 위한 생성자를 자동으로 만들어주는 어노테이션은 3가지가 있다.
+
+1. `***NOArgsConstructor***` : 매개변수가 없는 생성자를 자동 생성한다.
+2. `***AllArgsConstructor***` : 모든 필드를 매개변수로 갖는 생성자를 자동 생성한다.
+3. `***RequiredArgsConstructor***`: 필드 중 final이나 @NotNull이 설정된 변수를 매개변수로 갖는 생성자를 자동 생성한다.
+
+### `@ToString`
+
+이름 그대로 toString() 메서드를 생성하는 어노테이션이다.
+Product 클래스에 @toString()을 적용해 Delombok을 수행하면 아래와 같은 코드가 생성된다.
+
+**자동 생성되는 toString()메서드**
+
+```java
+public String to String(){
+	return "Product(number=" + this.getNumber() + ", name= "=this.getname() +", price="
+			+ this.getPrice() + ", stock=" + this.getStock() + ", createdAt=" + this.getCreatedAt()
+			+ ", updateAt=" + this.getupdateAt() +")";
+}
+```
+
+toString()메서드는 필드의 값을 문자열로 조합해서 리턴합니다.
+또한 민감한 정보처럼 숨겨야 할 정보가 있다면 아래와 같이 @ToString 어노테이션이 제공하는 exclude 속성을 사용해 특정 필드를 자동 생성에서 제외할 수 있습니다.
+
+**@ToString 어노테이션이 제공하는 exclude 속성활용**
+
+```java
+@ToString(exclude="name")
+@Table(name = "product")
+public class Product{
+...
+}
+```
+
+### @EqualsAndHashCode
+
+객체의 동등성과 동일성을 비교하는 연산 메서드를 생성합니다.
+
+다시 말해, **`@EqualsAndHashCode`**는 Lombok 라이브러리에서 제공하는 어노테이션으로, Java 클래스에서 **`equals()`** 메서드와 **`hashCode()`** 메서드를 자동으로 생성해주는 역할을 합니다. 이 어노테이션은 클래스의 모든 필드 또는 특정 필드를 기반으로 두 메서드를 생성하며, 이를 통해 객체 비교와 해시 기반 컬렉션(예: **`HashSet`**, **`HashMap`**)의 키 관리를 보다 쉽게 할 수 있습니다.
+
+### **`equals()`와 `hashCode()` 메서드**
+
+- **`equals()`** 메서드는 두 객체의 동등성을 검사하는 메서드로, 객체의 내용(상태)이 같은지 비교합니다.
+- **`hashCode()`** 메서드는 객체의 해시 코드를 반환하는 메서드로, 객체를 해시 테이블에 저장하는 데 사용됩니다. **`equals()`**로 동등하다 판정된 객체는 동일한 해시 코드를 반환해야 합니다.
+
+### **예제 코드**
+
+아래 코드에서는 일반적인 Java 구현과 Lombok을 사용한 구현을 비교하여 보여줍니다.
+
+### 일반 Java 구현
+
+```java
+public class User {
+    private String name;
+    private int age;
+
+    public User(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        User user = (User) o;
+        return age == user.age && Objects.equals(name, user.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(name, age);
+    }
+}
+
+```
+
+### Lombok을 사용한 구현
+
+Lombok의 **`@EqualsAndHashCode`**를 사용하여 같은 기능을 더 간단히 구현할 수 있습니다.
+
+```java
+import lombok.EqualsAndHashCode;
+
+@EqualsAndHashCode
+public class User {
+    private String name;
+    private int age;
+
+    public User(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+}
+
+```
+
+### **사용 시 주의사항**
+
+- Lombok을 사용할 때는 Lombok 라이브러리가 설치되어 있어야 하며, IDE에 Lombok 플러그인이 설치되어 있어야 합니다.
+- **`@EqualsAndHashCode`**는 기본적으로 모든 필드를 사용하지만, **`exclude`**나 **`of`** 속성을 통해 특정 필드만 포함하거나 제외할 수 있습니다. 예를 들어, 특정 필드를 제외하려면 **`@EqualsAndHashCode(exclude={"age"})`**와 같이 사용할 수 있습니다.
+
+이러한 자동 생성 기능을 사용하면 코드의 양을 줄일 수 있고, 특히 많은 필드를 가진 클래스에서 메서드 구현의 오류 가능성을 감소시킬 수 있습니다. 하지만, 라이브러리에 의존하는 만큼 프로젝트의 의존성 관리를 잘 해야 하며, 때로는 자동 생성 코드가 예상과 다르게 동작할 수 있어 이를 이해하고 사용하는 것이 중요합니다.
